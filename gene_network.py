@@ -5,7 +5,11 @@ import pandas as pd
 import networkx as nx
 
 
-def gene_network(df, cutoff, weight="weight", distance=True):
+def gene_network(df,
+                 cutoff,
+                 weight="weight",
+                 distance=True,
+                 chromosome_level=False):
     """ Create a gene network based on a pandas::DataFrame
 
     Parameters
@@ -30,6 +34,10 @@ def gene_network(df, cutoff, weight="weight", distance=True):
     distance : boolean, default True
         If True then `df` should include the columns `start_1' and `start_2'
         where `start_1' is the starting position of `gene_1' in `chrom_1`.
+    
+    chromosome_level: boolean, default False
+        If True collapse nodes $n_1$ and $n_2$ both in $gene_1$, for all $n_1$
+        and $n_2$.
     """
 
     basic_columns = {"gene_1", "gene_2", "chrom_1", "chrom_2"}
@@ -50,14 +58,18 @@ def gene_network(df, cutoff, weight="weight", distance=True):
     # Distance (only for cis)
     if distance:
         df["distance"] = 0
-        df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'distance'] = (
-            df.loc[(df["type"] == "cis") &
-                   (df.start_1 < df.start_2), 'start_2'] -
-            df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'start_1'])
-        df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'distance'] = (
-            df.loc[(df["type"] == "cis") &
-                   (df.start_2 < df.start_1), 'start_1'] -
-            df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'start_2'])
+        df.loc[(df["type"] == "cis") &
+               (df.start_1 < df.start_2), 'distance'] = (
+                   df.loc[(df["type"] == "cis") &
+                          (df.start_1 < df.start_2), 'start_2'] -
+                   df.loc[(df["type"] == "cis") &
+                          (df.start_1 < df.start_2), 'start_1'])
+        df.loc[(df["type"] == "cis") &
+               (df.start_2 < df.start_1), 'distance'] = (
+                   df.loc[(df["type"] == "cis") &
+                          (df.start_2 < df.start_1), 'start_1'] -
+                   df.loc[(df["type"] == "cis") &
+                          (df.start_2 < df.start_1), 'start_2'])
         edge_attributes.append("distance")
 
     G = nx.from_pandas_edgelist(df,
@@ -65,15 +77,38 @@ def gene_network(df, cutoff, weight="weight", distance=True):
                                 target="gene_2",
                                 edge_attr=edge_attributes)
 
+    if chromosome_level:
+        chromosomes = set(
+            np.append(df["chrom_1"].unique(), df["chrom_2"].unique()))
+
+        for chrom in chromosomes:
+            gene_list = list(
+                set(
+                    np.append(
+                        df[(df["chrom_1"] == chrom)]["gene_1"].unique(),
+                        df[(df["chrom_2"] == chrom)]["gene_2"].unique())))
+            print("gene_list", gene_list)
+            mapping = {gene_list[0]: chrom}
+            G = nx.relabel_nodes(G, mapping)
+            for i, gene in enumerate(gene_list[1:]):
+                G = nx.contracted_nodes(G,
+                                        chrom,
+                                        gene,
+                                        self_loops=False)
+
+        return G
+
     return G
 
-df = pd.DataFrame({"gene_1": ["ENSG00000167074", "ENSG00000159189"],
-                   "gene_2": ["ENSG00000174738", "ENSG00000173369"],
-                   "weight": [0.577364, 0.568734],
-                   "chrom_1": ["22", "1"],
-                   "chrom_2": ["3", "1"],
-                   "start_1": [41367333, 22643630],
-                   "start_2": [23945260, 22652762]})
 
+df = pd.DataFrame({
+    "gene_1": ["ENSG00000167074", "ENSG00000159189"],
+    "gene_2": ["ENSG00000174738", "ENSG00000173369"],
+    "weight": [0.577364, 0.568734],
+    "chrom_1": ["22", "3"],
+    "chrom_2": ["1", "1"],
+    "start_1": [41367333, 22643630],
+    "start_2": [23945260, 22652762]
+})
 
-G = gene_network(df, cutoff=(0,1), distance=True)
+G = gene_network(df, cutoff=(0, 1), distance=True, chromosome_level=True)
