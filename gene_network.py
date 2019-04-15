@@ -5,11 +5,7 @@ import pandas as pd
 import networkx as nx
 
 
-def gene_network(df,
-                 cutoff,
-                 weight="weight",
-                 distance=True,
-                 chromosome_level=False):
+def gene_network(df, cutoff, weight="weight", chromosome_level=False):
     """ Create a gene network based on a pandas::DataFrame
 
     Parameters
@@ -17,12 +13,15 @@ def gene_network(df,
     df : pandas::DataFrame
         Weighted edge list of the network. The basic header should be as
         follows::
-            |gene_1|weight|gene_2|chrom_1|chrom_2|
+            |gene_1|weight|gene_2|chrom_1|chrom_2|start_1|start_2|
         Where `chrom_1' and `chrom_2' are the chromosomes of gene_1 and gene_2,
         respectively. Column `weight' is the co-expression of `gene_1' and
         `gene_2' and can be specified in the keyword variable `weight'. 
+    
+        `start_1` and `start_2` define the starting position of `gene_1` and
+        `gene_2`, respectively.
         
-        All columns have `str` as dype except for `weight` which is a float.
+        All columns have `str` as dtype except for `weight` which is a float.
     
     
     cutoff: 2-tuple of ints/floats
@@ -30,10 +29,6 @@ def gene_network(df,
     
     weight : str, default 'weight'
         Column name of weight.
-    
-    distance : boolean, default True
-        If True then `df` should include the columns `start_1' and `start_2'
-        where `start_1' is the starting position of `gene_1' in `chrom_1`.
     
     chromosome_level: boolean, default False
         If True collapse nodes $n_1$ and $n_2$ both in $gene_1$, for all $n_1$
@@ -54,61 +49,48 @@ def gene_network(df,
     # Chromosomes separated with a hyphen
     df["chroms"] = df[["chrom_1", "chrom_2"]].apply(lambda x: "-".join(x),
                                                     axis=1).values
-    edge_attributes = ["type", "chroms"]
+    edge_attributes = ["weight", "type", "chroms"]
     # Distance (only for cis)
-    if distance:
-        df["distance"] = 0
-        df.loc[(df["type"] == "cis") &
-               (df.start_1 < df.start_2), 'distance'] = (
-                   df.loc[(df["type"] == "cis") &
-                          (df.start_1 < df.start_2), 'start_2'] -
-                   df.loc[(df["type"] == "cis") &
-                          (df.start_1 < df.start_2), 'start_1'])
-        df.loc[(df["type"] == "cis") &
-               (df.start_2 < df.start_1), 'distance'] = (
-                   df.loc[(df["type"] == "cis") &
-                          (df.start_2 < df.start_1), 'start_1'] -
-                   df.loc[(df["type"] == "cis") &
-                          (df.start_2 < df.start_1), 'start_2'])
-        edge_attributes.append("distance")
+    df["distance"] = 0
+    df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'distance'] = (
+        df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'start_2'] -
+        df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'start_1'])
+    df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'distance'] = (
+        df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'start_1'] -
+        df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'start_2'])
+    edge_attributes.append("distance")
 
-    G = nx.from_pandas_edgelist(df,
-                                source="gene_1",
-                                target="gene_2",
-                                edge_attr=edge_attributes)
+    if not chromosome_level:
+        G_genes = nx.from_pandas_edgelist(df,
+                                          source="gene_1",
+                                          target="gene_2",
+                                          edge_attr=edge_attributes)
 
-    if chromosome_level:
-        chromosomes = set(
-            np.append(df["chrom_1"].unique(), df["chrom_2"].unique()))
+        return G_genes
 
-        for chrom in chromosomes:
-            gene_list = list(
-                set(
-                    np.append(
-                        df[(df["chrom_1"] == chrom)]["gene_1"].unique(),
-                        df[(df["chrom_2"] == chrom)]["gene_2"].unique())))
-            print("gene_list", gene_list)
-            mapping = {gene_list[0]: chrom}
-            G = nx.relabel_nodes(G, mapping)
-            for i, gene in enumerate(gene_list[1:]):
-                G = nx.contracted_nodes(G,
-                                        chrom,
-                                        gene,
-                                        self_loops=False)
+    # Numer of genes per chromosome
+    chrom_card = df["chrom_1"].value_counts() + df["chrom_2"].value_counts()
 
-        return G
+    aggregation = {"weight": ["count", "mean"], "distance": "mean"}
+    df["edge_id"] = df["chrom_1"] + "-" + df["chrom_2"]
+    df["edge_id"] = df["edge_id"].apply(lambda x: "-".join(sorted(x.split("-"))
+                                                           ))
+    df_chrom = df.groupby("edge_id").agg(aggregation).reset_index()
 
-    return G
+    df_chrom["chrom_1"] = df_chrom["edge_id"].apply(lambda x: x.split("-")[0])
+    df_chrom["chrom_2"] = df_chrom["edge_id"].apply(lambda x: x.split("-")[1])
 
+    df_final = pd.DataFrame()
+    df_final["chrom_1"] = df_chrom["chrom_1"]
+    df_final["chrom_2"] = df_chrom["chrom_2"]
+    df_final["strength"] = df_chrom["weight"]["mean"].values
+    df_final["n_pairs"] = df_chrom["weight"]["count"].values
+    df_final["mean_distance"] = df_chrom["distance"]["mean"].values
 
-df = pd.DataFrame({
-    "gene_1": ["ENSG00000167074", "ENSG00000159189"],
-    "gene_2": ["ENSG00000174738", "ENSG00000173369"],
-    "weight": [0.577364, 0.568734],
-    "chrom_1": ["22", "3"],
-    "chrom_2": ["1", "1"],
-    "start_1": [41367333, 22643630],
-    "start_2": [23945260, 22652762]
-})
+    G_chrom = nx.from_pandas_edgelist(
+        df_final,
+        source="chrom_1",
+        target="chrom_2",
+        edge_attr=["mean_distance", "strength", "n_pairs"])
 
-G = gene_network(df, cutoff=(0, 1), distance=True, chromosome_level=True)
+    return G_chrom
