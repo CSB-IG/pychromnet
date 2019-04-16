@@ -5,8 +5,69 @@ import pandas as pd
 import networkx as nx
 
 
+def table_format(edgelist, biomart):
+    """Edit edgelist to correct table format for `gene_network` function.
+    
+    Default edgelist |gene_1|weight|gene_2| needs additional attributes, namely
+    `start_1`, `start_2`, `chrom_1`, and `chrom_2`. Those attributes are taken
+    from a `BioMart` file.
+    
+    Parameters
+    ----------
+    edgelist : str
+        Path to edgelist. Tab separated format, 3 columns.
+        HEADER:  |gene_1|weight|gene_2|
+    
+
+    biomart : str
+        Path to BioMart file. Tab separated format, 8 columns.
+        HEADER: |Gene stable ID|Chromosome/scaffold name|Gene start (bp)|\
+        |Gene end (bp)|Gene % GC content|Gene type|HGNC symbol|NCBI gene ID|
+    """
+
+    df_bio = pd.read_csv(biomart, sep="\t")
+    df_bio = df_bio.drop_duplicates(subset="Gene stable ID")
+
+    df = pd.read_csv(edgelist, sep="\t", names=["gene_1", "weight", "gene_2"])
+
+    # First gene
+    df = pd.merge(df,
+                  df_bio[[
+                      "Chromosome/scaffold name", "Gene stable ID",
+                      'Gene start (bp)', 'Gene end (bp)'
+                  ]],
+                  how="left",
+                  left_on="gene_1",
+                  right_on="Gene stable ID")
+    df.drop("Gene stable ID", axis=1, inplace=True)
+    df.rename(columns={
+        "Chromosome/scaffold name": "chrom_1",
+        'Gene start (bp)': "start_1",
+        "Gene end (bp)": "end_1"
+    },
+              inplace=True)
+    # Second gene
+    df = pd.merge(df,
+                  df_bio[[
+                      "Chromosome/scaffold name", "Gene stable ID",
+                      'Gene start (bp)', 'Gene end (bp)'
+                  ]],
+                  how="left",
+                  left_on="gene_2",
+                  right_on="Gene stable ID")
+    df.drop("Gene stable ID", axis=1, inplace=True)
+    df.rename(columns={
+        "Chromosome/scaffold name": "chrom_2",
+        'Gene start (bp)': "start_2",
+        "Gene end (bp)": "end_2"
+    },
+              inplace=True)
+
+    return df
+
+
 def gene_network(df, cutoff, weight="weight", chromosome_level=False):
-    """ Create a gene network based on a pandas::DataFrame
+    """Create a gene network based on a pandas::DataFrame
 
     Parameters
     ----------
@@ -92,5 +153,11 @@ def gene_network(df, cutoff, weight="weight", chromosome_level=False):
         source="chrom_1",
         target="chrom_2",
         edge_attr=["mean_distance", "strength", "n_pairs"])
+
+    # Add node attributes
+    node_attrs = {}
+    for chrom in chrom_card.index:
+        node_attrs[chrom] = chrom_card.loc[chrom]
+    nx.set_node_attributes(G_chrom, node_attrs, name="size")
 
     return G_chrom
