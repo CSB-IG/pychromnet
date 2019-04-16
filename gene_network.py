@@ -66,98 +66,140 @@ def table_format(edgelist, biomart):
     return df
 
 
-def gene_network(df, cutoff, weight="weight", chromosome_level=False):
-    """Create a gene network based on a pandas::DataFrame
+def gene_network(edgelist,
+                 biomart,
+                 cutoff=(0, 1),
+                 block="chrom",
+                 normalize=True,
+                 self_loops=True,
+                 start="start"):
+    """Create a block network and its edgelist based on a gene regulatory network.
 
     Parameters
     ----------
-    df : pandas::DataFrame
-        Weighted edge list of the network. The basic header should be as
-        follows::
-            |gene_1|weight|gene_2|chrom_1|chrom_2|start_1|start_2|
-        Where `chrom_1' and `chrom_2' are the chromosomes of gene_1 and gene_2,
-        respectively. Column `weight' is the co-expression of `gene_1' and
-        `gene_2' and can be specified in the keyword variable `weight'. 
+    edgelist : str
+        Path to gene-gene weigthed edgelist. IMPORTANT: format of
+        <tab>-separated table must be:
+            gene_1, weight, gene_2.
     
-        `start_1` and `start_2` define the starting position of `gene_1` and
-        `gene_2`, respectively.
-        
-        All columns have `str` as dtype except for `weight` which is a float.
+    biomart: str
+        Path to biomart gene information <tab>-sperated table. Table should
+        contain a column `Gene stable ID` to identify each gene. A `block'
+        column to identify the granularity of the network (see related keyword
+        variable `block`).
     
+    cutoff: 2-tuple of floats, default (0, 1)
+        Half-closed interval $[a, b) \subset (0, 1)$ defining the edge set.
     
-    cutoff: 2-tuple of ints/floats
-        Interval `(weight_min, weight_max)' defining the edge set.
+    block : str, default 'chrom'
+        Name of gene label to define the gene partition and the resulting
+        quotient network, where each group of genes defined by `block` is
+        contracted into a single node. This label needs to be the name of a
+        column in `biomart` (e.g. 'chromosome', 'karyoband', etc.).
     
-    weight : str, default 'weight'
-        Column name of weight.
+    normalize : boolean, default True *TO INCLUDE*
+       If True, normalizes block sizes.
     
-    chromosome_level: boolean, default False
-        If True collapse nodes $n_1$ and $n_2$ both in $gene_1$, for all $n_1$
-        and $n_2$.
+    self_loops : boolean, default True *TO INCLUDE*
+       If True, considers self loops (intra-block loops) and computes average
+       distance between adjacent genes within blocks.
+    
+    start : str, default "start"
+        Name of start column.
     """
 
-    basic_columns = {"gene_1", "gene_2", "chrom_1", "chrom_2"}
-    columns_error = ("'{}' must be columns of `df' "
-                     "pandas.DataFrame".format(basic_columns))
+    # Global variables
+    start_1 = start + "_1"
+    start_2 = start + "_2"
+    block_1 = block + "_1"
+    block_2 = block + "_2"
 
-    if not basic_columns.issubset(df.columns):
-        raise Exception(columns_error)
+    # Read edgelist
+    edgelist_header = ["gene_1", "weight", "gene_2"]
+    edgelist_dtypes = ["str", "float", "str"]
+    df = pd.read_csv(edgelist,
+                     delimiter="\t",
+                     names=edgelist_header,
+                     dtype=dict(zip(edgelist_header, edgelist_dtypes)))
+    # Cutoff filter
+    df = df[(df["weight"] >= cutoff[0]) & (df["weight"] < cutoff[1])]
 
-    df = df[(df[weight] >= cutoff[0]) & (df[weight] < cutoff[1])]
-    # Create edge attributes
+    # Read BioMart
+    df_bio = pd.read_csv(biomart, delimiter="\t")
+    df_bio = df_bio.drop_duplicates(subset="Gene stable ID")
+
+    # Merge blocks
+    df_merge = pd.merge(df,
+                        df_bio,
+                        how="left",
+                        left_on="gene_1",
+                        right_on="Gene stable ID")
+    df_merge = df_merge.drop("Gene stable ID", axis=1)
+    df_merge = pd.merge(df_merge,
+                        df_bio,
+                        how="left",
+                        left_on="gene_2",
+                        right_on="Gene stable ID",
+                        suffixes=("_1", "_2"))
+    df_merge = df_merge.drop("Gene stable ID", axis=1)
+
     # Cis/Trans Flag
-    df["type"] = np.where((df['chrom_1'] == df['chrom_2']), "cis", "trans")
-    # Chromosomes separated with a hyphen
-    df["chroms"] = df[["chrom_1", "chrom_2"]].apply(lambda x: "-".join(x),
-                                                    axis=1).values
-    edge_attributes = ["weight", "type", "chroms"]
-    # Distance (only for cis)
-    df["distance"] = 0
-    df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'distance'] = (
-        df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'start_2'] -
-        df.loc[(df["type"] == "cis") & (df.start_1 < df.start_2), 'start_1'])
-    df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'distance'] = (
-        df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'start_1'] -
-        df.loc[(df["type"] == "cis") & (df.start_2 < df.start_1), 'start_2'])
-    edge_attributes.append("distance")
+    df_merge["type"] = np.where((df_merge[block_1] == df_merge[block_2]), "cis", "trans")
+    # Distance
+    df_merge["distance"] = 0
+    df_merge.loc[(df_merge["type"] == "cis") & (
+        df_merge[start_1] < df_merge[start_2]), 'distance'] = (
+            df_merge.loc[(df_merge["type"] == "cis") &
+                         (df_merge[start_1] < df_merge[start_2]), start_2] -
+            df_merge.loc[(df_merge["type"] == "cis") &
+                         (df_merge[start_1] < df_merge[start_2]), start_1])
+    df_merge.loc[(df_merge["type"] == "cis") & (
+        df_merge[start_2] < df_merge[start_1]), 'distance'] = (
+            df_merge.loc[(df_merge["type"] == "cis") &
+                         (df_merge[start_2] < df_merge[start_1]), start_1] -
+            df_merge.loc[(df_merge["type"] == "cis") &
+                         (df_merge[start_2] < df_merge[start_1]), start_2])
 
-    if not chromosome_level:
-        G_genes = nx.from_pandas_edgelist(df,
-                                          source="gene_1",
-                                          target="gene_2",
-                                          edge_attr=edge_attributes)
+    # Add variables to main DF
+    df["distance"] = df_merge["distance"]
+    df["type"] = df_merge["type"]
 
-        return G_genes
+    # Compute numer of genes per block, for normalization.
+    block_card = df_merge[block_1].value_counts() + df_merge[block_2].value_counts()
 
-    # Numer of genes per chromosome
-    chrom_card = df["chrom_1"].value_counts() + df["chrom_2"].value_counts()
-
+    # Contracted edges need an aggregation function. Based on `weight`, we
+    # compute `strength` and `n_pairs`. Being mean weight shared by gene-pairs
+    # between blocks and number of gene-pairs, respectively. We also
+    # consider `distance` to be the mean distance of connected gene-pairs within
+    # a block.
     aggregation = {"weight": ["count", "mean"], "distance": "mean"}
-    df["edge_id"] = df["chrom_1"] + "-" + df["chrom_2"]
+    df["edge_id"] = df_merge[block_1] + "-" + df_merge[block_2]
+    # Some genes might not be listed in `biomart` file.
+    df = df.dropna().reset_index()
     df["edge_id"] = df["edge_id"].apply(lambda x: "-".join(sorted(x.split("-"))
                                                            ))
-    df_chrom = df.groupby("edge_id").agg(aggregation).reset_index()
+    df_block = df.groupby("edge_id").agg(aggregation).reset_index()
 
-    df_chrom["chrom_1"] = df_chrom["edge_id"].apply(lambda x: x.split("-")[0])
-    df_chrom["chrom_2"] = df_chrom["edge_id"].apply(lambda x: x.split("-")[1])
+    df_block[block_1] = df_block["edge_id"].apply(lambda x: x.split("-")[0])
+    df_block[block_2] = df_block["edge_id"].apply(lambda x: x.split("-")[1])
 
     df_final = pd.DataFrame()
-    df_final["chrom_1"] = df_chrom["chrom_1"]
-    df_final["chrom_2"] = df_chrom["chrom_2"]
-    df_final["strength"] = df_chrom["weight"]["mean"].values
-    df_final["n_pairs"] = df_chrom["weight"]["count"].values
-    df_final["mean_distance"] = df_chrom["distance"]["mean"].values
+    df_final[block_1] = df_block[block_1]
+    df_final[block_2] = df_block[block_2]
+    df_final["strength"] = df_block["weight"]["mean"].values
+    df_final["n_pairs"] = df_block["weight"]["count"].values
+    df_final["mean_distance"] = df_block["distance"]["mean"].values
 
-    G_chrom = nx.from_pandas_edgelist(
+    G_block = nx.from_pandas_edgelist(
         df_final,
-        source="chrom_1",
-        target="chrom_2",
+        source=block_1,
+        target=block_2,
         edge_attr=["mean_distance", "strength", "n_pairs"])
 
     # Add node attributes
     node_attrs = {}
-    for chrom in chrom_card.index:
-        node_attrs[chrom] = chrom_card.loc[chrom]
-    nx.set_node_attributes(G_chrom, node_attrs, name="size")
+    for _block in block_card.index:
+        node_attrs[_block] = block_card.loc[_block]
+    nx.set_node_attributes(G_block, node_attrs, name="size")
 
-    return G_chrom
+    return G_block, df_final
