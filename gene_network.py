@@ -172,7 +172,8 @@ def gene_network(edgelist,
     # between blocks and number of gene-pairs, respectively. We also
     # consider `distance` to be the mean distance of connected gene-pairs within
     # a block.
-    aggregation = {"weight": ["count", "mean"], "distance": "mean"}
+    aggregation = {"weight": ["count", "mean", "median", "max", "min", "std"],
+                   "distance": ["mean", "median"]}
     df["edge_id"] = df_merge[block_1] + "-" + df_merge[block_2]
     # Some genes might not be listed in `biomart` file.
     df = df.dropna().reset_index()
@@ -186,9 +187,15 @@ def gene_network(edgelist,
     df_final = pd.DataFrame()
     df_final[block_1] = df_block[block_1]
     df_final[block_2] = df_block[block_2]
+    # Final values
     df_final["strength"] = df_block["weight"]["mean"].values
+    df_final["median_weight"] = df_block["weight"]["median"].values
+    df_final["max_weight"] = df_block["weight"]["max"].values
+    df_final["min_weight"] = df_blocl["weight"]["min"].values
+    df_final["std_weight"] = df_blocl["weight"]["std"].values
     df_final["n_pairs"] = df_block["weight"]["count"].values
     df_final["mean_distance"] = df_block["distance"]["mean"].values
+    df_final["median_distance"] = df_block["distance"]["median"].values
 
     G_block = nx.from_pandas_edgelist(
         df_final,
