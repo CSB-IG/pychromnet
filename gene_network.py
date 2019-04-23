@@ -191,8 +191,8 @@ def gene_network(edgelist,
     df_final["strength"] = df_block["weight"]["mean"].values
     df_final["median_weight"] = df_block["weight"]["median"].values
     df_final["max_weight"] = df_block["weight"]["max"].values
-    df_final["min_weight"] = df_blocl["weight"]["min"].values
-    df_final["std_weight"] = df_blocl["weight"]["std"].values
+    df_final["min_weight"] = df_block["weight"]["min"].values
+    df_final["std_weight"] = df_block["weight"]["std"].values
     df_final["n_pairs"] = df_block["weight"]["count"].values
     df_final["mean_distance"] = df_block["distance"]["mean"].values
     df_final["median_distance"] = df_block["distance"]["median"].values
