@@ -147,24 +147,15 @@ def gene_network(edgelist,
     df_merge["type"] = np.where((df_merge[block_1] == df_merge[block_2]), "cis", "trans")
     # Distance
     df_merge["distance"] = 0
-    df_merge.loc[(df_merge["type"] == "cis") & (
-        df_merge[start_1] < df_merge[start_2]), 'distance'] = (
-            df_merge.loc[(df_merge["type"] == "cis") &
-                         (df_merge[start_1] < df_merge[start_2]), start_2] -
-            df_merge.loc[(df_merge["type"] == "cis") &
-                         (df_merge[start_1] < df_merge[start_2]), start_1])
-    df_merge.loc[(df_merge["type"] == "cis") & (
-        df_merge[start_2] < df_merge[start_1]), 'distance'] = (
-            df_merge.loc[(df_merge["type"] == "cis") &
-                         (df_merge[start_2] < df_merge[start_1]), start_1] -
-            df_merge.loc[(df_merge["type"] == "cis") &
-                         (df_merge[start_2] < df_merge[start_1]), start_2])
+    df_merge.loc[(df_merge["type"] == "cis"), "distance"] = np.abs(
+        df_merge.loc[(df_merge["type"] == "cis"), start_1] -
+        df_merge.loc[(df_merge["type"] == "cis"), start_2])
 
     # Add variables to main DF
     df["distance"] = df_merge["distance"]
     df["type"] = df_merge["type"]
 
-    # Compute numer of genes per block, for normalization.
+    # Compute number of genes per block, for normalization.
     block_card = df_merge[block_1].value_counts() + df_merge[block_2].value_counts()
 
     # Contracted edges need an aggregation function. Based on `weight`, we
